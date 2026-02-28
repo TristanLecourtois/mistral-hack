@@ -2,6 +2,12 @@ import json
 import re
 import os
 from mistralai import Mistral
+
+_MD_RE = re.compile(r'\*{1,3}([^*\n]*)\*{1,3}|_{1,2}([^_\n]*)_{1,2}')
+
+def _strip_markdown(text: str) -> str:
+    """Retire le formatage markdown (bold/italic) du texte."""
+    return _MD_RE.sub(lambda m: (m.group(1) or m.group(2) or '').strip(), text)
 import inflect
 from fastapi import WebSocket, APIRouter, WebSocketDisconnect
 import asyncio
@@ -10,7 +16,7 @@ from datetime import datetime
 from db import update_call, get_call, get_all_calls
 from socket_manager import manager
 from prompts import SYSTEM_PROMPT, EXTRACTION_PROMPT
-from geocoding import geocode
+from geocoding import geocode, street_view_url
 from emergency_services import find_nearest, get_route
 
 # Rempli au démarrage par main.py via lifespan
@@ -215,7 +221,7 @@ class Agent:
             while True:
                 kind, value = await queue.get()
                 if kind == "chunk":
-                    output = value
+                    output = _strip_markdown(value)
                     numbers = re.findall(r"\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b", output)
                     for number in numbers:
                         words = self.number_to_words(number)
@@ -272,7 +278,7 @@ class Agent:
                 temperature=0.3,
                 max_tokens=80,
             )
-            return response.choices[0].message.content
+            return _strip_markdown(response.choices[0].message.content)
 
         loop = asyncio.get_running_loop()
         try:
@@ -283,15 +289,17 @@ class Agent:
 
     async def geocode_location(self, location_name: str) -> dict:
         """
-        Géocode une adresse et retourne coordinates + image street view en base64.
+        Géocode une adresse, retourne coordinates + formatted_address + Bing Streetside.
         """
         def sync_geocode():
             result = geocode(location_name)
             if not result:
                 return {}
+            lat, lng = result["lat"], result["lng"]
             return {
-                "coordinates": {"lat": result["lat"], "lng": result["lng"]},
+                "coordinates": {"lat": lat, "lng": lng},
                 "location_name": result["formatted_address"],
+                "street_image": street_view_url(lat, lng),
             }
 
         loop = asyncio.get_running_loop()

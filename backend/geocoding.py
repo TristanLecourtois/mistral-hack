@@ -1,30 +1,37 @@
-import requests
+import googlemaps
 
+GOOGLE_API_KEY = "AIzaSyDix0E1Y6refMWcgt-GAdlq3hjg0PB98HI"
 
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+_gmaps = googlemaps.Client(key=GOOGLE_API_KEY)
 
 
 def geocode(address: str) -> dict | None:
     """
-    Convertit une adresse en coordonnées GPS via Nominatim (OpenStreetMap).
+    Convertit une adresse en coordonnées GPS via Google Maps.
     Retourne {"lat": float, "lng": float, "formatted_address": str} ou None.
     """
     try:
-        response = requests.get(
-            NOMINATIM_URL,
-            params={"q": address, "format": "json", "limit": 1},
-            headers={"User-Agent": "hackathon-911-dispatcher"},
-            timeout=10,
-        )
-        data = response.json()
-        if not data:
-            print(f"Nominatim: aucun résultat pour '{address}'")
+        results = _gmaps.geocode(address)
+        if not results:
+            print(f"[GEOCODE] Aucun résultat pour '{address}'")
             return None
+        loc = results[0]["geometry"]["location"]
         return {
-            "lat": float(data[0]["lat"]),
-            "lng": float(data[0]["lon"]),
-            "formatted_address": data[0]["display_name"],
+            "lat": loc["lat"],
+            "lng": loc["lng"],
+            "formatted_address": results[0]["formatted_address"],
         }
     except Exception as e:
-        print(f"Erreur geocoding: {e}")
+        print(f"[GEOCODE] Erreur: {e}")
         return None
+
+
+def street_view_url(lat: float, lng: float, width: int = 400, height: int = 220) -> str:
+    """
+    Retourne l'URL directe de l'image Google Street View.
+    Utilisable directement comme <img src="...">.
+    """
+    return (
+        f"https://maps.googleapis.com/maps/api/streetview"
+        f"?size={width}x{height}&location={lat},{lng}&key={GOOGLE_API_KEY}"
+    )

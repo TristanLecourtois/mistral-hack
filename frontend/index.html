@@ -1,1 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>911 Dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
 
+    <!-- Sidebar gauche : liste des appels -->
+    <aside id="sidebar-left">
+      <div id="sl-header">
+        <div id="sl-title">
+          <span class="dot-live"></span>
+          <span>DISPATCH OPS</span>
+        </div>
+        <div id="sl-clock"></div>
+      </div>
+
+      <!-- Stats -->
+      <div id="sl-stats">
+        <div class="stat-block" id="stat-active">
+          <div class="stat-value" id="stat-active-val">0</div>
+          <div class="stat-label">ACTIVE</div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-block">
+          <div class="stat-value critical" id="stat-critical-val">0</div>
+          <div class="stat-label">CRITICAL</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-value moderate" id="stat-moderate-val">0</div>
+          <div class="stat-label">MODERATE</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-value low" id="stat-low-val">0</div>
+          <div class="stat-label">LOW</div>
+        </div>
+      </div>
+
+      <div id="sl-list-header">
+        <span>INCIDENTS — PRIORITY ORDER</span>
+      </div>
+      <div id="call-list"></div>
+    </aside>
+
+    <!-- Carte centrale -->
+    <main id="map-container">
+      <div id="map"></div>
+
+      <!-- Dispatch panel -->
+      <div id="dispatch-panel">
+        <div class="dp-header">
+          <span class="dot-live"></span>
+          <span>DISPATCH CENTER</span>
+        </div>
+        <div id="dp-call-info"></div>
+        <div id="dp-services"></div>
+        <div id="dp-log"></div>
+      </div>
+    </main>
+
+    <!-- Sidebar droite : conversation -->
+    <aside id="sidebar-right">
+      <div class="sidebar-header">
+        <h2 id="conv-title">Sélectionne un appel</h2>
+      </div>
+      <div id="conv-scores-wrapper">
+        <div id="conv-scores-toggle">
+          <button class="toggle-btn active" id="btn-bar"   onclick="setChartMode('bar')">BAR</button>
+          <button class="toggle-btn"        id="btn-radar" onclick="setChartMode('radar')">RADAR</button>
+        </div>
+        <div id="conv-scores"></div>
+      </div>
+      <div id="conv-meta"></div>
+      <div id="conv-transcript"></div>
+    </aside>
+
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

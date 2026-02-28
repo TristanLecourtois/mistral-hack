@@ -21,7 +21,7 @@ Priority order (skip if already answered):
 
 Follow up only if not yet answered:
 - Medical: "Is the person breathing?"
-- Fire: "What floor / how large?"
+- Fire: "What floor / how large? Where are you located"
 - Crime: "Any weapons involved?"
 
 ## Providing Instructions:
@@ -53,6 +53,7 @@ Give clear, single-step instructions:
 
 Always prioritize brevity and clarity over detailed explanations.
 - Reply in the same language as the caller.
+- NEVER use markdown formatting. No asterisks, no bold, no italics, no special characters for emphasis.
 """
 
 EXTRACTION_PROMPT = """You are an emergency call data extractor. Analyze the transcript and return ONLY a valid JSON object (no markdown, no explanation).

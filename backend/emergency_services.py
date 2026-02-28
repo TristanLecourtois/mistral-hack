@@ -1,7 +1,36 @@
 import json
 import math
+import time
 import requests
 import os
+
+# ── Overpass endpoints (fallback si rate-limit) ───────────────────────────────
+_OVERPASS_ENDPOINTS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+]
+
+def _fetch_overpass(query: str, label: str) -> list:
+    """Essaie plusieurs endpoints Overpass et retourne les éléments OSM."""
+    for url in _OVERPASS_ENDPOINTS:
+        try:
+            resp = requests.post(
+                url, data={"data": query},
+                timeout=30,
+                headers={"Accept": "application/json"},
+            )
+            if resp.status_code != 200 or not resp.text.strip():
+                print(f"[SERVICES] {url} → HTTP {resp.status_code} (vide), fallback…")
+                continue
+            data = resp.json()
+            elements = data.get("elements", [])
+            print(f"[SERVICES] {len(elements)} {label} via {url}")
+            return elements
+        except Exception as e:
+            print(f"[SERVICES] {url} erreur ({label}): {e}")
+    print(f"[SERVICES] Tous les endpoints Overpass ont échoué pour {label}")
+    return []
 
 # ── Haversine distance (km) ──────────────────────────────────────────────────
 
@@ -43,78 +72,60 @@ def load_police_stations() -> list[dict]:
 
 def fetch_fire_stations() -> list[dict]:
     query = """
-    [out:json];
+    [out:json][timeout:25];
     (
       node["amenity"="fire_station"](48.70,2.20,49.00,2.60);
       way["amenity"="fire_station"](48.70,2.20,49.00,2.60);
     );
     out center;
     """
-    try:
-        response = requests.post(
-            "https://overpass-api.de/api/interpreter",
-            data=query,
-            timeout=20,
-        )
-        elements = response.json().get("elements", [])
-        stations = []
-        for el in elements:
-            lat = el.get("lat") or (el.get("center") or {}).get("lat")
-            lon = el.get("lon") or (el.get("center") or {}).get("lon")
-            if lat and lon:
-                tags = el.get("tags", {})
-                stations.append({
-                    "lat":     lat,
-                    "lng":     lon,
-                    "name":    tags.get("name", "Caserne de pompiers"),
-                    "address": tags.get("addr:street", ""),
-                    "phone":   tags.get("phone", ""),
-                    "hours":   "",
-                    "type":    "fire",
-                })
-        print(f"[SERVICES] {len(stations)} casernes de pompiers chargées via Overpass")
-        return stations
-    except Exception as e:
-        print(f"[SERVICES] Erreur Overpass API: {e}")
-        return []
+    elements = _fetch_overpass(query, "casernes de pompiers")
+    stations = []
+    for el in elements:
+        lat = el.get("lat") or (el.get("center") or {}).get("lat")
+        lon = el.get("lon") or (el.get("center") or {}).get("lon")
+        if lat and lon:
+            tags = el.get("tags", {})
+            stations.append({
+                "lat":     lat,
+                "lng":     lon,
+                "name":    tags.get("name", "Caserne de pompiers"),
+                "address": tags.get("addr:street", ""),
+                "phone":   tags.get("phone", ""),
+                "hours":   "",
+                "type":    "fire",
+            })
+    return stations
 
 
 def fetch_hospitals() -> list[dict]:
+    # Petite pause pour ne pas déclencher le rate-limit Overpass
+    time.sleep(2)
     query = """
-    [out:json];
+    [out:json][timeout:25];
     (
       node["amenity"="hospital"](48.70,2.20,49.00,2.60);
       way["amenity"="hospital"](48.70,2.20,49.00,2.60);
     );
     out center;
     """
-    try:
-        response = requests.post(
-            "https://overpass-api.de/api/interpreter",
-            data=query,
-            timeout=20,
-        )
-        elements = response.json().get("elements", [])
-        hospitals = []
-        for el in elements:
-            lat = el.get("lat") or (el.get("center") or {}).get("lat")
-            lon = el.get("lon") or (el.get("center") or {}).get("lon")
-            if lat and lon:
-                tags = el.get("tags", {})
-                hospitals.append({
-                    "lat":     lat,
-                    "lng":     lon,
-                    "name":    tags.get("name", "Hôpital"),
-                    "address": tags.get("addr:street", ""),
-                    "phone":   tags.get("phone", ""),
-                    "hours":   "",
-                    "type":    "hospital",
-                })
-        print(f"[SERVICES] {len(hospitals)} hôpitaux chargés via Overpass")
-        return hospitals
-    except Exception as e:
-        print(f"[SERVICES] Erreur Overpass API hospitals: {e}")
-        return []
+    elements = _fetch_overpass(query, "hôpitaux")
+    hospitals = []
+    for el in elements:
+        lat = el.get("lat") or (el.get("center") or {}).get("lat")
+        lon = el.get("lon") or (el.get("center") or {}).get("lon")
+        if lat and lon:
+            tags = el.get("tags", {})
+            hospitals.append({
+                "lat":     lat,
+                "lng":     lon,
+                "name":    tags.get("name", "Hôpital"),
+                "address": tags.get("addr:street", ""),
+                "phone":   tags.get("phone", ""),
+                "hours":   "",
+                "type":    "hospital",
+            })
+    return hospitals
 
 
 # ── Find nearest ─────────────────────────────────────────────────────────────
