@@ -36,8 +36,8 @@ router = APIRouter(prefix="/twilio")
 MULAW_RATE      = 8000
 CHUNK_BYTES     = 160          # 20 ms de mulaw à 8 kHz
 SPEECH_THRESH   = 400          # RMS energy au-dessus = parole détectée
-SILENCE_CHUNKS  = 25           # 25 × 20 ms = 500 ms de silence → fin d'énoncé
-MIN_SPEECH      = 12           # 12 × 20 ms = 240 ms minimum de parole
+SILENCE_CHUNKS  = 40           # 40 × 20 ms = 800 ms de silence → fin d'énoncé
+MIN_SPEECH      = 15           # 15 × 20 ms = 300 ms minimum de parole
 
 
 # ── Audio helpers ─────────────────────────────────────────────────────────────
@@ -95,12 +95,13 @@ async def twilio_stream(websocket: WebSocket):
     stream_sid = None
 
     # VAD state
-    pcm_buffer    = bytearray()
-    silence_count = 0
-    speech_count  = 0
-    recording     = False
-    last_geocoded = None
-    dispatch_sent = False
+    pcm_buffer     = bytearray()
+    silence_count  = 0
+    speech_count   = 0
+    recording      = False
+    agent_speaking = False    # True pendant qu'on envoie du TTS
+    last_geocoded  = None
+    dispatch_sent  = False
 
     # Enregistrer l'appel dans la DB
     update_call(call_id, {
@@ -129,16 +130,17 @@ async def twilio_stream(websocket: WebSocket):
                     greeting_pcm = await loop.run_in_executor(
                         None, speak_pcm, "9-1-1, what's your emergency?"
                     )
+                    agent_speaking = True
                     await send_audio(websocket, stream_sid, greeting_pcm)
                     print("[TWILIO] Salutation envoyée.")
                 except Exception as tts_err:
                     print(f"[TWILIO] Erreur TTS salutation : {tts_err}")
-
-                # Réinitialiser le VAD
-                pcm_buffer.clear()
-                recording     = False
-                silence_count = 0
-                speech_count  = 0
+                finally:
+                    agent_speaking = False
+                    pcm_buffer.clear()
+                    recording     = False
+                    silence_count = 0
+                    speech_count  = 0
 
             # ── Chunk audio entrant ───────────────────────────────────────────
             elif event == "media":
@@ -154,6 +156,10 @@ async def twilio_stream(websocket: WebSocket):
                 # VAD simple par énergie RMS
                 samples = np.frombuffer(pcm_chunk, dtype=np.int16)
                 rms     = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
+
+                # Ignorer l'audio entrant pendant que l'agent parle
+                if agent_speaking:
+                    continue
 
                 if rms > SPEECH_THRESH:
                     recording     = True
@@ -203,9 +209,17 @@ async def twilio_stream(websocket: WebSocket):
                         if response_text and stream_sid:
                             try:
                                 tts_pcm = await loop.run_in_executor(None, speak_pcm, response_text)
+                                agent_speaking = True
                                 await send_audio(websocket, stream_sid, tts_pcm)
                             except Exception as tts_err:
                                 print(f"[TWILIO] Erreur TTS réponse : {tts_err}")
+                            finally:
+                                # Réinitialiser le VAD après le TTS pour repartir proprement
+                                agent_speaking = False
+                                pcm_buffer.clear()
+                                recording     = False
+                                silence_count = 0
+                                speech_count  = 0
 
                         # ── Extraction des infos ──────────────────────────────
                         extracted = await agent.extract_call_info()
@@ -248,9 +262,16 @@ async def twilio_stream(websocket: WebSocket):
                                                     dispatch_pcm = await loop.run_in_executor(
                                                         None, speak_pcm, dispatch_text
                                                     )
+                                                    agent_speaking = True
                                                     await send_audio(websocket, stream_sid, dispatch_pcm)
                                                 except Exception as tts_err:
                                                     print(f"[TWILIO] Erreur TTS dispatch : {tts_err}")
+                                                finally:
+                                                    agent_speaking = False
+                                                    pcm_buffer.clear()
+                                                    recording     = False
+                                                    silence_count = 0
+                                                    speech_count  = 0
 
                             await manager.broadcast({"event": "db_response", "data": get_all_calls()})
 

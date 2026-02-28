@@ -262,7 +262,7 @@ class Agent:
                 "You are a 911 dispatcher. Generate ONE brief, professional sentence "
                 "to inform the caller that help is on the way. "
                 "Include the service name and distance. "
-                "Reply in the SAME language as the caller. Be concise and reassuring."
+                "ALWAYS reply in English. Be concise and reassuring."
             )},
             {"role": "user", "content": (
                 f"Transcript:\n{transcript_text}\n\n"
