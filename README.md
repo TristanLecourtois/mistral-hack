@@ -1,3 +1,6 @@
+
+```txt
+
 voice_assistant_hackathon/
 │
 ├─ README.md                   # Description, setup, instructions
@@ -29,3 +32,6 @@ voice_assistant_hackathon/
 └─ utils/                      # Scripts utilitaires
     ├─ logging.py
     └─ helpers.py
+
+
+```
