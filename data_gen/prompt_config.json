@@ -1,0 +1,89 @@
+{
+  "default_prompt": {
+    "template": "Generate a realistic emergency call scenario about {scenario_type} following these guidelines:\n\nEmergency Dispatcher AI Assistant\nPrimary role: Quickly gather critical information and provide concise guidance.\nCore Guidelines:\n- Begin with natural variations: '9-1-1, what's your emergency?', '9-1-1, what's the address of your emergency?', 'What's your emergency?'\n- Remain calm and professional but vary tone appropriately\n- Ask questions naturally, not in rigid sequence\n- Adapt questioning based on caller responses\n- Use varied phrasing and synonyms to avoid repetition\n- Provide instructions that fit the specific situation\n- End conversations naturally based on scenario resolution\n\nInformation Gathering:\nAsk relevant questions in natural order (NOT rigid sequence):\n- Location: 'Where are you calling from?', 'What's your current location?', 'Can you give me your address?'\n- Injuries: 'Is anyone hurt?', 'Are there any injuries?', 'Is the person injured?'\n- Danger: 'Is anyone in immediate danger?', 'Is the situation dangerous right now?', 'Are you safe?'\n\nScenario-Specific Variations:\n- Medical: 'Is the person conscious?', 'Are they breathing normally?', 'Do they have any medical conditions?'\n- Fire: 'How large is the fire?', 'Is the fire spreading?', 'Are there people trapped?'\n- Crime: 'Can you describe what happened?', 'Are the suspects still there?', 'Did you see any weapons?'\n\nInstruction Variations:\n- Medical: 'Check if they're breathing.', 'See if they respond to you.', 'Try to keep them calm.'\n- Fire: 'Get to a safe location.', 'Avoid smoke inhalation.', 'Don't try to fight the fire yourself.'\n- Crime: 'Stay in a safe place.', 'Lock doors and windows.', 'Don't confront the suspects.'\n\nNatural Conversation Flow:\n- Adapt follow-up questions based on answers\n- Use appropriate emotional tone (calm for real emergencies, firm for pranks)\n- Vary question phrasing throughout the call\n- Provide situation-specific guidance\n- End calls appropriately (urgent vs. resolved vs. prank)\n\nAvoid These Patterns:\n\u274c Rigid question sequences\n\u274c Identical phrasing in every call\n\u274c Robotic, unnatural responses\n\u274c Always ending with same phrase\n\u274c Ignoring caller's specific situation\n\nEncourage These Patterns:\n\u2705 Natural language variations\n\u2705 Context-appropriate responses\n\u2705 Adaptive questioning\n\u2705 Situation-specific instructions\n\u2705 Realistic call progression\n\u2705 Varied conversation endings\n\nControl the following dimensions:\n- True severity level: (low/moderate/high/critical)\n- Caller anxiety level: (0-10)\n- Caller coherence level: (0-10)\n- Caller seriousness: (0-10)\n- Caller role: (victim/bystander/prank caller/healthcare professional)\n- Cognitive condition: (normal/intoxicated/psychotic/panicked/confused)\n\nEnsure:\n- Linguistic markers reflect the specified anxiety and coherence.\n- Severity in situation summary matches the true severity parameter.\n- If seriousness less than 4, embed subtle indicators of prank behavior.\n- If coherence less than 4, include fragmented or illogical speech.\n- If anxiety greater than 7, include breathlessness, repetition, urgency markers.\n- VARY agent responses to avoid formulaic patterns\n- Create NATURAL conversation flow, not rigid scripts\n- Adapt to the specific scenario and caller responses\n\nGenerate NATURAL, VARIED conversations that avoid repetitive patterns!\nReturn JSON.",
+    "instructions": [
+      "Format as discussion array with role/content pairs",
+      "Use 'user' role for caller and 'agent' role for dispatcher",
+      "Include complete dialogue exchange",
+      "Score each criteria (0-10) with WIDE RANGE of values",
+      "   - proximity: caller's physical distance to emergency (0=direct victim, 10=remote witness)",
+      "   - anxiety: caller's anxiety level (must vary: 1-10, not always high)",
+      "   - severity: actual danger level (must vary: 1-10, include low/moderate)",
+      "   - coherence: how clear/coherent the caller is (must vary: 1-10, include low)",
+      "   - seriousness: 0 if prank/joke, 10 if real emergency (must vary: 0-10)",
+      "IMPORTANT: Ensure diverse score distribution across examples",
+      "CRITICAL: Vary agent responses to avoid formulaic patterns",
+      "- Use different question phrasing for each call",
+      "- Adapt responses based on caller's specific situation",
+      "- Provide varied instructions and guidance",
+      "- End conversations naturally with different closings",
+      "- Avoid identical question sequences",
+      "Include examples with low severity (minor issues, false alarms)",
+      "Include examples with low coherence (confused, intoxicated callers)",
+      "Include examples with low seriousness (pranks, non-emergencies)",
+      "Avoid always generating high-scoring emergencies",
+      "EXAMPLE SCORE RANGES NEEDED:",
+      "- Low severity: anxiety=2-4, severity=1-3, coherence=6-8, seriousness=2-4",
+      "- Low coherence: anxiety=5-7, severity=3-6, coherence=1-3, seriousness=4-7",
+      "- Prank calls: anxiety=2-5, severity=1-2, coherence=7-9, seriousness=0-2",
+      "- High severity: anxiety=8-10, severity=8-10, coherence=4-7, seriousness=8-10",
+      "- Moderate cases: anxiety=4-6, severity=4-6, coherence=5-8, seriousness=5-7",
+      "AGENT RESPONSE VARIATION REQUIREMENTS:",
+      "- Never use identical question sequences",
+      "- Vary opening questions: 'What's your emergency?' vs 'Where are you calling from?'",
+      "- Adapt follow-ups based on caller responses",
+      "- Use synonyms and rephrasing: 'Are you safe?' vs 'Is anyone in danger?'",
+      "- Provide situation-specific instructions, not generic advice",
+      "- End calls appropriately: urgent vs resolved vs prank closings"
+    ],
+    "output_format": "Return JSON in this exact format: {\"discussion\": [{\"role\": \"user\", \"content\": \"...\"}, {\"role\": \"agent\", \"content\": \"...\"}, ...], \"scores\": {\"anxiety\": number, \"severity\": number, \"coherence\": number, \"seriousness\": number}}",
+    "conversation_length": "VARY conversation length based on scenario and caller responses:",
+    "length_guidelines": [
+      "Short conversations: 4-6 turns (pranks, false alarms, quickly resolved)",
+      "Medium conversations: 8-12 turns (moderate emergencies, clear situations)",
+      "Long conversations: 14-20+ turns (complex emergencies, confused callers, evolving situations)",
+      "Let conversation length emerge naturally from scenario dynamics",
+      "End appropriately: pranks lose interest, real emergencies get resolved, complex situations need more detail"
+    ],
+    "length_examples": [
+      "Prank call: 4-6 turns (caller loses interest or dispatcher ends call)",
+      "Minor injury: 6-8 turns (quick assessment and instructions)",
+      "Serious medical: 12-16 turns (detailed assessment and extended instructions)",
+      "Confused caller: 14-20 turns (repetition and clarification needed)",
+      "Evolving situation: 16-20+ turns (situation changes require ongoing guidance)"
+    ]
+  },
+  "scenario_specific": {
+    "medical": {
+      "additional_instructions": [
+        "Include medical terminology appropriate for the situation",
+        "Specify if caller is patient, bystander, or healthcare professional",
+        "Mention any visible symptoms or injuries"
+      ]
+    },
+    "fire": {
+      "additional_instructions": [
+        "Describe the fire size, location, and spread",
+        "Mention if people are trapped or evacuated",
+        "Include smoke visibility and potential hazards"
+      ]
+    },
+    "police": {
+      "additional_instructions": [
+        "Specify type of crime or emergency",
+        "Describe suspect appearance if applicable",
+        "Mention weapons involvement if any"
+      ]
+    }
+  },
+  "output_structure": {
+    "transcript": "Full dialogue between caller and operator",
+    "situation": "Brief summary of the emergency situation",
+    "scores": {
+      "anxiety": "Integer 0-10",
+      "severity": "Integer 0-10",
+      "coherence": "Integer 0-10",
+      "seriousness": "Integer 0-10"
+    }
+  }
+}
