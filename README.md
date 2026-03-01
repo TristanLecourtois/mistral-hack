@@ -1,7 +1,5 @@
 
-# Mistral Hack Backend Service
-
-This directory contains the backend service and supporting assets for the Mistral Hackathon project. The service is built using Python and provides APIs for speech-to-text, text-to-speech, emergency lookups, geocoding, and more.
+# AuxilAI 
 
 The idea is to handle large incoming call volumes during a catastrophic event when call centers are overwhelmed. The goal is not to replace human responders, but to provide a solution for managing localized, high-volume calls that come in at once for the same event.
 
