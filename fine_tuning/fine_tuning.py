@@ -10,8 +10,9 @@ It includes data loading, preprocessing, model setup, training, and evaluation.
 import os
 import json
 import torch
+from transformers import MistralForCausalLM  # Try this first, or if that fails:
+
 from transformers import (
-    AutoModelForCausalLM,
     AutoTokenizer,
     TrainingArguments,
     Trainer,
@@ -88,6 +89,13 @@ def setup_wandb():
         return None
 
 
+# Add this at the top of your imports
+from transformers import MistralForCausalLM  # Try this first, or if that fails:
+
+# Option 1: If using transformers >= 4.45 (recommended)
+# Simply upgrade transformers: pip install -U transformers
+
+# Option 2: If upgrade isn't possible, use the specific model class
 def setup_model_and_tokenizer():
     """Load model and tokenizer with QLoRA configuration"""
     
@@ -100,28 +108,37 @@ def setup_model_and_tokenizer():
         load_in_4bit=True,
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        llm_int8_enable_fp32_cpu_offload=True  # Enable CPU offloading
+
     )
     
-    # Load model with HF token
     print("   Loading model...")
     try:
         from hf_config import HF_API_TOKEN
-        model = AutoModelForCausalLM.from_pretrained(
+        
+        # Try loading with trust_remote_code (for newer architectures)
+        model = MistralForCausalLM.from_pretrained(
+            model_name,
+            quantization_config=bnb_config,
+            device_map="auto",
+            trust_remote_code=True,  # Critical for new model architectures
+            token=HF_API_TOKEN,
+            # Add this to force download of latest config files
+            revision="main"
+        )
+    except Exception as e:
+        print(f"   AutoModel failed, trying direct load: {e}")
+        # Fallback: Try loading as Mistral model directly
+        from transformers import MistralForCausalLM
+        model = MistralForCausalLM.from_pretrained(
             model_name,
             quantization_config=bnb_config,
             device_map="auto",
             trust_remote_code=True,
-            token=HF_API_TOKEN
+            token=HF_API_TOKEN if 'HF_API_TOKEN' in locals() else None
         )
-    except ImportError:
-        # Fallback to environment variable
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            quantization_config=bnb_config,
-            device_map="auto",
-            trust_remote_code=True
-        )
+    
     
     # Load tokenizer
     print("   Loading tokenizer...")
@@ -132,6 +149,7 @@ def setup_model_and_tokenizer():
     model = prepare_model_for_kbit_training(model)
     
     return model, tokenizer
+
 
 
 def setup_peft_config():
@@ -236,9 +254,9 @@ def train_model(
 def main():
     """Main execution function"""
     
-    # File paths
-    train_file = "output/emergency_call_finetune_train.jsonl"
-    val_file = "output/emergency_call_finetune_test.jsonl"
+    # File paths /workspace/mistral-hack/dataset
+    train_file = "/workspace/mistral-hack/dataset/data_ft_train.json"
+    val_file = "/workspace/mistral-hack/dataset/data_ft_test.json"
     
     print("🔧 Mistral-Small Fine-Tuning")
     print("=" * 50)

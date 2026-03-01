@@ -1,0 +1,84 @@
+_wandb:
+    value:
+        cli_version: 0.25.0
+        e:
+            pl2yg5libw5zd3usnq6q2iciepgrgfzv:
+                codePath: fine_tuning/fine_tuning.py
+                codePathLocal: fine_tuning.py
+                cpu_count: 24
+                cpu_count_logical: 48
+                cudaVersion: "12.8"
+                disk:
+                    /:
+                        total: "105226698752"
+                        used: "58574766080"
+                email: abelmaxv@gmail.com
+                executable: /venv/myenv/bin/python
+                git:
+                    commit: c8c1530e4b6eff664f2f2066996bd59b535775bd
+                    remote: https://github.com/TristanLecourtois/mistral-hack.git
+                gpu: NVIDIA GeForce RTX 3060
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ampere
+                      cudaCores: 3584
+                      memoryTotal: "12884901888"
+                      name: NVIDIA GeForce RTX 3060
+                      uuid: GPU-612ff754-e781-dfe1-44fd-8286f76f1829
+                host: 23a85f8b9ab9
+                memory:
+                    total: "134912684032"
+                os: Linux-5.15.0-164-generic-x86_64-with-glibc2.39
+                program: /workspace/mistral-hack/fine_tuning/fine_tuning.py
+                python: CPython 3.14.3
+                root: /workspace/mistral-hack/fine_tuning
+                startedAt: "2026-03-01T09:28:02.749320Z"
+                writerId: pl2yg5libw5zd3usnq6q2iciepgrgfzv
+        m: []
+        python_version: 3.14.3
+        t:
+            "1":
+                - 1
+                - 5
+                - 11
+                - 41
+                - 49
+                - 51
+                - 53
+                - 71
+                - 84
+                - 98
+            "2":
+                - 1
+                - 5
+                - 11
+                - 41
+                - 49
+                - 51
+                - 53
+                - 71
+                - 84
+                - 98
+            "3":
+                - 16
+            "4": 3.14.3
+            "5": 0.25.0
+            "6": 5.2.0
+            "12": 0.25.0
+            "13": linux-x86_64
+batch_size:
+    value: 4
+dataset:
+    value: emergency_calls
+epochs:
+    value: 3
+learning_rate:
+    value: 0.0002
+method:
+    value: QLoRA
+model:
+    value: mistralai/Mistral-Small-3.1-24B-Base-2503
+optimization:
+    value: paged_adamw_8bit
+quantization:
+    value: 4bit_nf4
