@@ -5,6 +5,8 @@ This directory contains the backend service and supporting assets for the Mistra
 
 The idea is to handle large incoming call volumes during a catastrophic event when call centers are overwhelmed. The goal is not to replace human responders, but to provide a solution for managing localized, high-volume calls that come in at once for the same event.
 
+Mistral-7B Fine-tuning with LoRA + Weave Score Regularization Integrates Weave evaluation scores as a regularization term during training.
+
 
 ## 🗂️ Repository Structure
 
