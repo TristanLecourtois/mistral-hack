@@ -7,7 +7,7 @@ This file contains the W&B API key and configuration for the fine-tuning project
 """
 
 # W&B API Key (from user)
-WANDB_API_KEY = "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"
+
 
 # Project configuration
 WANDB_PROJECT = "mistral-emergency-finetune"

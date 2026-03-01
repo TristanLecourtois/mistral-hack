@@ -7,7 +7,7 @@ This file contains the Hugging Face token for accessing gated models.
 """
 
 # Hugging Face API Token
-HF_API_TOKEN = "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"
+
 
 # You can also set this as an environment variable:
 # export HUGGING_FACE_HUB_TOKEN="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"
