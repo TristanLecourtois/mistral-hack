@@ -11,6 +11,7 @@ from db import get_all_calls, get_call, update_call
 from emergency_services import build_registry
 import agent as agent_module
 import twilio_voice
+from twilio_voice import active_streams
 
 
 @asynccontextmanager
@@ -63,10 +64,22 @@ async def dashboard_endpoint(websocket: WebSocket):
                 if msg.get("type") == "dispatch":
                     _handle_dispatch(msg)
                     await manager.broadcast({"event": "db_response", "data": get_all_calls()})
+                elif msg.get("type") == "end_call":
+                    _handle_end_call(msg)
             except Exception:
                 pass  # keepalive ou message non-JSON
     except WebSocketDisconnect:
         await manager.disconnect(client_id)
+
+
+def _handle_end_call(msg: dict):
+    call_id = msg.get("call_id")
+    if not call_id:
+        return
+    event = active_streams.get(call_id)
+    if event:
+        event.set()
+        print(f"[DASHBOARD] Fin d'appel demandée → {call_id}")
 
 
 def _handle_dispatch(msg: dict):

@@ -122,7 +122,9 @@ function updateDashboard() {
   renderSidebar();
   updateMarkers();
   if (activecallId && currentCalls[activecallId]) {
-    renderConversation(currentCalls[activecallId]);
+    const call = currentCalls[activecallId];
+    renderConversation(call);
+    updateEndCallButton(call);
   }
   updateDispatchPanel();
 }
@@ -266,6 +268,28 @@ function selectCall(callId) {
   // Affiche la conversation + dispatch panel
   renderConversation(call);
   updateDispatchPanel();
+  updateEndCallButton(call);
+}
+
+// ── Bouton End Call ──
+function updateEndCallButton(call) {
+  const btn = document.getElementById("btn-end-call");
+  if (!btn || !call) return;
+  const isActive = call.mode === "twilio" && call.status !== "ended";
+  btn.style.display = isActive ? "flex" : "none";
+}
+
+function endCall() {
+  if (!activecallId) return;
+  const call = currentCalls[activecallId];
+  if (!call || call.status === "ended") return;
+  ws.send(JSON.stringify({ type: "end_call", call_id: activecallId }));
+  // Feedback immédiat
+  const btn = document.getElementById("btn-end-call");
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="end-call-icon">📵</span> Ending…';
+  }
 }
 
 // ── Score definitions (5 axes) ──
