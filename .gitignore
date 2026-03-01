@@ -3,7 +3,7 @@ __pycache__/
 *.log
 *.sqlite3
 *.db
-
+backend/wav2vec2_checkpoints/
 # Environnements virtuels
 .venv/
 venv/
