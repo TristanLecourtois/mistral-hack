@@ -34,6 +34,7 @@ from prompts import SYSTEM_PROMPT
 from stt import transcribe_pcm
 from tts import speak_pcm
 from emergency_services import find_nearest, get_route
+from voice_emotion import analyze_voice_emotion, MAX_HISTORY
 import agent as agent_module
 
 load_dotenv()
@@ -47,8 +48,6 @@ active_streams: dict[str, asyncio.Event] = {}
 MULAW_RATE     = 8000
 CHUNK_BYTES    = 160          # 20 ms de mulaw à 8 kHz
 SPEECH_THRESH  = 400          # RMS → parole détectée
-BARGE_THRESH   = 700          # RMS → barge-in
-BARGE_CHUNKS   = 4            # 4 × 20 ms = 80 ms de parole continue avant interruption
 SILENCE_CHUNKS = 40           # 40 × 20 ms = 800 ms de silence
 MIN_SPEECH     = 15           # 15 × 20 ms = 300 ms minimum de parole
 
@@ -96,7 +95,6 @@ async def twilio_stream(websocket: WebSocket):
     silence_count = 0
     speech_count  = 0
     recording     = False
-    barge_count   = 0
 
     # TTS state
     agent_speaking = False
@@ -108,12 +106,11 @@ async def twilio_stream(websocket: WebSocket):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _reset_vad():
-        nonlocal pcm_buffer, recording, silence_count, speech_count, barge_count
+        nonlocal pcm_buffer, recording, silence_count, speech_count
         pcm_buffer.clear()
         recording     = False
         silence_count = 0
         speech_count  = 0
-        barge_count   = 0
 
     async def _twilio_clear():
         if stream_sid:
@@ -257,20 +254,8 @@ async def twilio_stream(websocket: WebSocket):
                     np.frombuffer(pcm_chunk, np.int16).astype(np.float32) ** 2
                 )))
 
-                # Barge-in : exige 80 ms de parole continue pour éviter les faux positifs
+                # Pendant le TTS : ignorer tout l'audio entrant (pas de barge-in)
                 if agent_speaking:
-                    if rms > BARGE_THRESH:
-                        barge_count += 1
-                        if barge_count >= BARGE_CHUNKS:
-                            print("[TWILIO] Barge-in → interruption TTS")
-                            barge_count = 0
-                            await _interrupt()
-                            _reset_vad()
-                            recording    = True
-                            speech_count = 1
-                            pcm_buffer.extend(pcm_chunk)
-                    else:
-                        barge_count = 0
                     continue
 
                 # TTS vient de terminer → nettoyer
@@ -292,11 +277,25 @@ async def twilio_stream(websocket: WebSocket):
                         audio_data = bytes(pcm_buffer)
                         _reset_vad()
 
-                        # Transcription
-                        text = await loop.run_in_executor(None, transcribe_pcm, audio_data)
+                        # Transcription + analyse vocale (en parallèle)
+                        text, voice_emo = await asyncio.gather(
+                            loop.run_in_executor(None, transcribe_pcm, audio_data),
+                            loop.run_in_executor(None, analyze_voice_emotion, audio_data),
+                        )
                         if not text:
                             continue
                         print(f"[TWILIO] Caller: '{text}'")
+
+                        # Mise à jour émotion vocale
+                        if voice_emo:
+                            print(f"[VOICE EMO] {voice_emo['emoji']} {voice_emo['label']} ({voice_emo['confidence']:.2f})")
+                            cur = get_call(call_id) or {}
+                            history = cur.get("voice_emotion_history", [])[-( MAX_HISTORY - 1):]
+                            history.append(voice_emo)
+                            update_call(call_id, {
+                                "voice_emotion":         voice_emo,
+                                "voice_emotion_history": history,
+                            })
 
                         # ── Agent Mistral ─────────────────────────────────────
                         chat_history = [
@@ -363,6 +362,12 @@ async def twilio_stream(websocket: WebSocket):
                                                     {"role": "assistant", "content": dispatch_text}
                                                 )
                                                 update_call(call_id, {"transcript": agent.get_transcript()})
+                                                # Attendre que le TTS de la réponse précédente soit terminé
+                                                if tts_task and not tts_task.done():
+                                                    try:
+                                                        await tts_task
+                                                    except Exception:
+                                                        pass
                                                 await _play_tts_background(dispatch_text)
 
                             await manager.broadcast({"event": "db_response", "data": get_all_calls()})

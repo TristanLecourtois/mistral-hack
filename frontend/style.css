@@ -349,6 +349,63 @@ body, html {
 }
 
 
+/* ── Voice emotion ── */
+#conv-voice-emotion {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.ve-header {
+  font-size: 8px;
+  letter-spacing: .12em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.ve-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ve-emoji {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.ve-info { flex: 1; }
+
+.ve-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+
+.ve-confidence {
+  font-size: 9px;
+  color: var(--muted);
+  margin-top: 2px;
+  letter-spacing: .06em;
+}
+
+.ve-history {
+  display: flex;
+  gap: 5px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.ve-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  opacity: 0.75;
+  transition: opacity .2s;
+}
+
+.ve-dot:last-child { opacity: 1; }
+
 /* ── Meta row ── */
 #conv-meta {
   padding: 8px 14px;

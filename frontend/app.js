@@ -451,6 +451,38 @@ function renderScores(call) {
   chartMode === "radar" ? renderRadar(scores) : renderBar(scores);
 }
 
+// ── Voice emotion ──
+const VE_DEFAULT = { label: "Composed", emoji: "🫤", color: "#94a3b8", confidence: null };
+
+function renderVoiceEmotion(call) {
+  const el = document.getElementById("conv-voice-emotion");
+  if (!call) { el.innerHTML = ""; return; }
+
+  // Baseline : on affiche toujours au moins "Composed" dès qu'un appel est sélectionné
+  const emo     = call.voice_emotion || VE_DEFAULT;
+  const history = call.voice_emotion_history || [];
+
+  const confidenceStr = (emo.confidence != null)
+    ? `confidence ${Math.round(emo.confidence * 100)}%`
+    : "awaiting analysis…";
+
+  const dots = history.map(e =>
+    `<div class="ve-dot" title="${e.label}" style="background:${e.color}"></div>`
+  ).join("");
+
+  el.innerHTML = `
+    <div class="ve-header">VOICE EMOTION ANALYSIS</div>
+    <div class="ve-current">
+      <span class="ve-emoji">${emo.emoji}</span>
+      <div class="ve-info">
+        <div class="ve-label" style="color:${emo.color}">${emo.label.toUpperCase()}</div>
+        <div class="ve-confidence">${confidenceStr}</div>
+      </div>
+    </div>
+    ${history.length > 1 ? `<div class="ve-history">${dots}</div>` : ""}
+  `;
+}
+
 // ── Sidebar droite : conversation ──
 function renderConversation(call) {
   const typeIcon = { fire: "🔥", hospital: "🏥", police: "🚔", other: "📞" };
@@ -458,6 +490,7 @@ function renderConversation(call) {
   const transcript = call.transcript || [];
 
   renderScores(call);
+  renderVoiceEmotion(call);
 
   // Titre
   document.getElementById("conv-title").textContent =
