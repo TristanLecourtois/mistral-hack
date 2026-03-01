@@ -1,6 +1,6 @@
 import googlemaps
 
-GOOGLE_API_KEY = "AIzaSyDix0E1Y6refMWcgt-GAdlq3hjg0PB98HI"
+
 
 
 _gmaps = googlemaps.Client(key=GOOGLE_API_KEY)
