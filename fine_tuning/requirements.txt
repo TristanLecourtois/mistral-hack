@@ -1,0 +1,19 @@
+# Hugging Face Fine-Tuning Requirements
+
+# Core packages
+torch>=2.0.0
+transformers>=4.36.0
+datasets>=2.14.0
+accelerate>=0.24.0
+peft>=0.6.0
+bitsandbytes>=0.41.0
+
+# Optional but recommended
+scipy
+pandas
+numpy
+sentencepiece
+
+# For monitoring and training
+trl>=0.7.0
+wandb
