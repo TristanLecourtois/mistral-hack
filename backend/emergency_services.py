@@ -130,8 +130,11 @@ def fetch_hospitals() -> list[dict]:
 
 # ── Find nearest ─────────────────────────────────────────────────────────────
 
-def find_nearest(lat: float, lng: float, call_type: str, registry: dict) -> dict | None:
-    stations = registry.get(call_type, [])
+def find_nearest(lat: float, lng: float, call_type: str | None, registry: dict) -> dict | None:
+    # Cherche d'abord dans le type demandé, puis dans tous les types en fallback
+    stations = registry.get(call_type, []) if call_type else []
+    if not stations:
+        stations = [s for services in registry.values() for s in services]
     if not stations:
         return None
     nearest = min(stations, key=lambda s: haversine(lat, lng, s["lat"], s["lng"]))
@@ -139,28 +142,76 @@ def find_nearest(lat: float, lng: float, call_type: str, registry: dict) -> dict
     return {**nearest, "distance_km": round(dist, 2)}
 
 
-# ── Route OSRM ───────────────────────────────────────────────────────────────
+# ── Route ────────────────────────────────────────────────────────────────────
+
+_OSRM_SERVERS = [
+    "http://router.project-osrm.org",
+    "https://routing.openstreetmap.de/routed-car",
+]
+
+
+def _decode_polyline6(encoded: str) -> list:
+    """Décode le polyline Valhalla (précision 6) en [[lat, lng], ...]."""
+    result = []
+    index = lat = lng = 0
+    while index < len(encoded):
+        for is_lng in (False, True):
+            shift = value = 0
+            while True:
+                b = ord(encoded[index]) - 63
+                index += 1
+                value |= (b & 0x1f) << shift
+                shift += 5
+                if b < 0x20:
+                    break
+            delta = ~(value >> 1) if value & 1 else value >> 1
+            if is_lng:
+                lng += delta
+            else:
+                lat += delta
+        result.append([lat / 1e6, lng / 1e6])
+    return result
+
+
+def _route_valhalla(lat1, lng1, lat2, lng2) -> list | None:
+    try:
+        resp = requests.post(
+            "https://valhalla1.openstreetmap.de/route",
+            json={
+                "locations": [{"lat": lat1, "lon": lng1}, {"lat": lat2, "lon": lng2}],
+                "costing": "auto",
+                "directions_options": {"units": "km"},
+            },
+            timeout=12,
+        )
+        data = resp.json()
+        shape = data["trip"]["legs"][0]["shape"]
+        return _decode_polyline6(shape)
+    except Exception as e:
+        print(f"[VALHALLA] Erreur : {e}")
+        return None
+
 
 def get_route(lat1: float, lng1: float, lat2: float, lng2: float) -> list | None:
-    """
-    Retourne l'itinéraire réel entre deux points via OSRM (gratuit, sans clé).
-    Format retourné : [[lat, lng], ...] pour Leaflet.
-    """
-    try:
-        url = (
-            f"http://router.project-osrm.org/route/v1/driving/"
-            f"{lng1},{lat1};{lng2},{lat2}"
-            f"?overview=full&geometries=geojson"
-        )
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        if data.get("code") == "Ok":
-            coords = data["routes"][0]["geometry"]["coordinates"]
-            return [[c[1], c[0]] for c in coords]  # GeoJSON [lng,lat] → Leaflet [lat,lng]
-        return None
-    except Exception as e:
-        print(f"Erreur OSRM: {e}")
-        return None
+    """Itinéraire réel via OSRM (plusieurs serveurs) puis Valhalla en fallback."""
+    for server in _OSRM_SERVERS:
+        try:
+            url = (
+                f"{server}/route/v1/driving/"
+                f"{lng1},{lat1};{lng2},{lat2}"
+                f"?overview=full&geometries=geojson"
+            )
+            resp = requests.get(url, timeout=8)
+            data = resp.json()
+            if data.get("code") == "Ok":
+                coords = data["routes"][0]["geometry"]["coordinates"]
+                return [[c[1], c[0]] for c in coords]
+            print(f"[OSRM] {server} → code={data.get('code')}")
+        except Exception as e:
+            print(f"[OSRM] {server} → {e}")
+
+    print("[ROUTE] OSRM indisponible, fallback Valhalla…")
+    return _route_valhalla(lat1, lng1, lat2, lng2)
 
 
 # ── Registry (chargé une seule fois au démarrage) ────────────────────────────

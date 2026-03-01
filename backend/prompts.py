@@ -66,6 +66,7 @@ Fields to extract:
 - "location_name": exact location mentioned by caller, empty string if unknown
 - "name": caller's name if mentioned, empty string if unknown
 - "recommendation": single most important immediate action, max 10 words
+- "instructions": JSON array of 4 short safety steps for the caller (no newlines), e.g. ["Step one", "Step two", "Step three", "Step four"]
 - "emotions": list of objects {emotion: string, intensity: float 0-1} based on caller's tone
 - "scores": object with 5 integer scores from 1 to 10:
   - "anxiety": caller's anxiety/panic level (1=calm, 10=extreme panic)

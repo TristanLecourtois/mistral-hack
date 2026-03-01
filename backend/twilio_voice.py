@@ -26,12 +26,15 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import Response
 from dotenv import load_dotenv
 
-from db import update_call, get_all_calls
+from db import update_call, get_all_calls, get_call
 from socket_manager import manager
+from sms import send_call_summary_sms
 from agent import Agent
 from prompts import SYSTEM_PROMPT
 from stt import transcribe_pcm
 from tts import speak_pcm
+from emergency_services import find_nearest, get_route
+import agent as agent_module
 
 load_dotenv()
 
@@ -44,7 +47,8 @@ active_streams: dict[str, asyncio.Event] = {}
 MULAW_RATE     = 8000
 CHUNK_BYTES    = 160          # 20 ms de mulaw à 8 kHz
 SPEECH_THRESH  = 400          # RMS → parole détectée
-BARGE_THRESH   = 550          # RMS → barge-in (plus haut pour éviter faux positifs)
+BARGE_THRESH   = 700          # RMS → barge-in
+BARGE_CHUNKS   = 4            # 4 × 20 ms = 80 ms de parole continue avant interruption
 SILENCE_CHUNKS = 40           # 40 × 20 ms = 800 ms de silence
 MIN_SPEECH     = 15           # 15 × 20 ms = 300 ms minimum de parole
 
@@ -92,6 +96,7 @@ async def twilio_stream(websocket: WebSocket):
     silence_count = 0
     speech_count  = 0
     recording     = False
+    barge_count   = 0
 
     # TTS state
     agent_speaking = False
@@ -103,11 +108,12 @@ async def twilio_stream(websocket: WebSocket):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _reset_vad():
-        nonlocal pcm_buffer, recording, silence_count, speech_count
+        nonlocal pcm_buffer, recording, silence_count, speech_count, barge_count
         pcm_buffer.clear()
         recording     = False
         silence_count = 0
         speech_count  = 0
+        barge_count   = 0
 
     async def _twilio_clear():
         if stream_sid:
@@ -123,11 +129,14 @@ async def twilio_stream(websocket: WebSocket):
         for payload in pcm_to_mulaw_chunks(pcm):
             if barge_flag[0]:
                 return
-            await websocket.send_text(json.dumps({
-                "event": "media",
-                "streamSid": stream_sid,
-                "media": {"payload": payload},
-            }))
+            try:
+                await websocket.send_text(json.dumps({
+                    "event": "media",
+                    "streamSid": stream_sid,
+                    "media": {"payload": payload},
+                }))
+            except Exception:
+                return  # WebSocket fermé, on arrête silencieusement
             await asyncio.sleep(0.018)
 
     async def _play_tts_blocking(text: str):
@@ -159,7 +168,7 @@ async def twilio_stream(websocket: WebSocket):
             nonlocal agent_speaking
             try:
                 await _send_chunks(pcm, barge_flag)
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, Exception):
                 barge_flag[0] = True
             finally:
                 agent_speaking = False
@@ -248,17 +257,20 @@ async def twilio_stream(websocket: WebSocket):
                     np.frombuffer(pcm_chunk, np.int16).astype(np.float32) ** 2
                 )))
 
-                # Barge-in : l'utilisateur parle pendant le TTS
-                if rms > BARGE_THRESH and agent_speaking:
-                    print("[TWILIO] Barge-in →  interruption TTS")
-                    await _interrupt()
-                    _reset_vad()
-                    recording    = True
-                    speech_count = 1
-                    pcm_buffer.extend(pcm_chunk)
-                    continue
-
+                # Barge-in : exige 80 ms de parole continue pour éviter les faux positifs
                 if agent_speaking:
+                    if rms > BARGE_THRESH:
+                        barge_count += 1
+                        if barge_count >= BARGE_CHUNKS:
+                            print("[TWILIO] Barge-in → interruption TTS")
+                            barge_count = 0
+                            await _interrupt()
+                            _reset_vad()
+                            recording    = True
+                            speech_count = 1
+                            pcm_buffer.extend(pcm_chunk)
+                    else:
+                        barge_count = 0
                     continue
 
                 # TTS vient de terminer → nettoyer
@@ -324,22 +336,23 @@ async def twilio_stream(websocket: WebSocket):
                                     update_call(call_id, geo)
                                     last_geocoded = location
 
-                                    from emergency_services import find_nearest, get_route
-                                    from db import get_call
-                                    import agent as agent_module
                                     call_type = extracted.get("type") or get_call(call_id).get("type")
                                     coords    = geo.get("coordinates")
-                                    if call_type and coords and agent_module.EMERGENCY_REGISTRY:
+                                    if coords and agent_module.EMERGENCY_REGISTRY:
                                         nearest = find_nearest(
                                             coords["lat"], coords["lng"],
                                             call_type, agent_module.EMERGENCY_REGISTRY
                                         )
                                         if nearest:
-                                            route = await loop.run_in_executor(
-                                                None, get_route,
-                                                nearest["lat"], nearest["lng"],
-                                                coords["lat"], coords["lng"],
-                                            )
+                                            try:
+                                                route = await asyncio.wait_for(
+                                                    loop.run_in_executor(None, get_route,
+                                                        nearest["lat"], nearest["lng"],
+                                                        coords["lat"], coords["lng"]),
+                                                    timeout=25.0,
+                                                )
+                                            except (asyncio.TimeoutError, Exception):
+                                                route = None
                                             nearest["route"] = route
                                             update_call(call_id, {"nearest_service": nearest})
 
@@ -368,3 +381,10 @@ async def twilio_stream(websocket: WebSocket):
         update_call(call_id, {"status": "ended"})
         await manager.broadcast({"event": "db_response", "data": get_all_calls()})
         print(f"[TWILIO] Stream fermé — {call_id}")
+        # Envoyer le résumé par SMS (attendu pour garantir l'envoi avant fermeture)
+        call_data = get_call(call_id)
+        if call_data:
+            try:
+                await loop.run_in_executor(None, send_call_summary_sms, call_data)
+            except Exception as e:
+                print(f"[SMS] Erreur finale : {e}")

@@ -8,6 +8,32 @@ _MD_RE = re.compile(r'\*{1,3}([^*\n]*)\*{1,3}|_{1,2}([^_\n]*)_{1,2}')
 def _strip_markdown(text: str) -> str:
     """Retire le formatage markdown (bold/italic) du texte."""
     return _MD_RE.sub(lambda m: (m.group(1) or m.group(2) or '').strip(), text)
+
+
+def _clean_json_string(raw: str) -> str:
+    """Échappe les caractères de contrôle littéraux à l'intérieur des strings JSON."""
+    result = []
+    in_string = False
+    escape_next = False
+    for ch in raw:
+        if escape_next:
+            result.append(ch)
+            escape_next = False
+        elif ch == '\\':
+            result.append(ch)
+            escape_next = True
+        elif ch == '"':
+            in_string = not in_string
+            result.append(ch)
+        elif in_string and ch == '\n':
+            result.append('\\n')
+        elif in_string and ch == '\r':
+            result.append('\\r')
+        elif in_string and ch == '\t':
+            result.append('\\t')
+        else:
+            result.append(ch)
+    return ''.join(result)
 import inflect
 from fastapi import WebSocket, APIRouter, WebSocketDisconnect
 import asyncio
@@ -105,19 +131,21 @@ async def voxtral_endpoint(websocket: WebSocket):
                         # Service d'urgence le plus proche
                         call_type = extracted.get("type") or get_call(id).get("type")
                         coords = geo.get("coordinates")
-                        print(f"[DEBUG] type={call_type} coords={coords} registry_keys={list(EMERGENCY_REGISTRY.keys())} sizes={[len(v) for v in EMERGENCY_REGISTRY.values()]}")
-                        if call_type and coords and EMERGENCY_REGISTRY:
+                        if coords and EMERGENCY_REGISTRY:
                             nearest = find_nearest(
                                 coords["lat"], coords["lng"],
                                 call_type, EMERGENCY_REGISTRY
                             )
                             if nearest:
-                                # Itinéraire réel via OSRM
-                                route = await asyncio.get_running_loop().run_in_executor(
-                                    None, get_route,
-                                    nearest["lat"], nearest["lng"],
-                                    coords["lat"], coords["lng"],
-                                )
+                                try:
+                                    route = await asyncio.wait_for(
+                                        asyncio.get_running_loop().run_in_executor(None, get_route,
+                                            nearest["lat"], nearest["lng"],
+                                            coords["lat"], coords["lng"]),
+                                        timeout=25.0,
+                                    )
+                                except (asyncio.TimeoutError, Exception):
+                                    route = None
                                 nearest["route"] = route
                                 update_call(id, {"nearest_service": nearest})
                                 print(f"[NEAREST] {nearest['name']} ({nearest['distance_km']} km)")
@@ -340,7 +368,9 @@ class Agent:
         try:
             raw = await loop.run_in_executor(None, sync_extract)
             raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-            return json.loads(raw)
+            # Nettoyer les caractères de contrôle dans les strings JSON
+            cleaned = _clean_json_string(raw)
+            return json.loads(cleaned)
         except Exception as e:
             print(f"Erreur extraction infos: {e}")
             return {}

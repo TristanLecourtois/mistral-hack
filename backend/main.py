@@ -11,18 +11,45 @@ from db import get_all_calls, get_call, update_call
 from emergency_services import build_registry
 import agent as agent_module
 import twilio_voice
-from twilio_voice import active_streams
 
 
 @asynccontextmanager
 async def lifespan(app):
-    # Chargement des services d'urgence au démarrage (une seule fois)
     import asyncio
+    from emergency_services import find_nearest, get_route
+
     print("[STARTUP] Chargement des services d'urgence...")
     agent_module.EMERGENCY_REGISTRY = await asyncio.get_event_loop().run_in_executor(
         None, build_registry
     )
     print("[STARTUP] Services chargés.")
+
+    # Pré-calculer le service le plus proche pour tous les appels (en parallèle)
+    loop = asyncio.get_running_loop()
+
+    async def _compute_one(call_id, call):
+        coords = call.get("coordinates")
+        if not coords or call.get("nearest_service") or not agent_module.EMERGENCY_REGISTRY:
+            return
+        nearest = find_nearest(coords["lat"], coords["lng"], call.get("type"), agent_module.EMERGENCY_REGISTRY)
+        if not nearest:
+            return
+        try:
+            route = await asyncio.wait_for(
+                loop.run_in_executor(None, get_route,
+                    nearest["lat"], nearest["lng"],
+                    coords["lat"], coords["lng"]),
+                timeout=25.0,
+            )
+        except (asyncio.TimeoutError, Exception):
+            route = None  # ligne droite en fallback côté frontend
+        nearest["route"] = route
+        update_call(call_id, {"nearest_service": nearest})
+
+    await asyncio.gather(*[
+        _compute_one(cid, c) for cid, c in get_all_calls().items()
+    ])
+    print("[STARTUP] Services les plus proches calculés.")
     yield
 
 
@@ -64,22 +91,11 @@ async def dashboard_endpoint(websocket: WebSocket):
                 if msg.get("type") == "dispatch":
                     _handle_dispatch(msg)
                     await manager.broadcast({"event": "db_response", "data": get_all_calls()})
-                elif msg.get("type") == "end_call":
-                    _handle_end_call(msg)
             except Exception:
                 pass  # keepalive ou message non-JSON
     except WebSocketDisconnect:
         await manager.disconnect(client_id)
 
-
-def _handle_end_call(msg: dict):
-    call_id = msg.get("call_id")
-    if not call_id:
-        return
-    event = active_streams.get(call_id)
-    if event:
-        event.set()
-        print(f"[DASHBOARD] Fin d'appel demandée → {call_id}")
 
 
 def _handle_dispatch(msg: dict):
