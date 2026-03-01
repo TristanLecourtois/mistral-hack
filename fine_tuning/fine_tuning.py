@@ -1,308 +1,312 @@
 #!/usr/bin/env python3
-
 """
-Complete Fine-Tuning Script for Mistral-Small
-
-This script fine-tunes Mistral-Small using the generated emergency call data.
-It includes data loading, preprocessing, model setup, training, and evaluation.
+Mistral-7B Fine-tuning with LoRA for Emergency Call Analysis
+Supports conversation format with scoring output
 """
 
 import os
 import json
 import torch
-from transformers import MistralForCausalLM  # Try this first, or if that fails:
-
+from datasets import Dataset
 from transformers import (
+    AutoModelForCausalLM,
     AutoTokenizer,
     TrainingArguments,
     Trainer,
-    BitsAndBytesConfig,
-    DataCollatorForLanguageModeling
+    DataCollatorForLanguageModeling,
+    BitsAndBytesConfig
 )
-from datasets import Dataset, load_dataset
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer
+from peft import (
+    LoraConfig,
+    get_peft_model,
+    prepare_model_for_kbit_training,
+    TaskType
+)
 import wandb
-from datetime import datetime
+from typing import Dict, List
+import argparse
 
 
-def load_and_preprocess_data(train_file: str, val_file: str = None):
-    """Load and preprocess data from JSONL files"""
-    
-    def load_jsonl(file_path):
-        """Load JSONL file and return list of dictionaries"""
-        data = []
-        with open(file_path, 'r') as f:
-            for line in f:
-                try:
-                    data.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-        return data
-    
-    # Load raw data
-    train_data = load_jsonl(train_file)
-    val_data = load_jsonl(val_file) if val_file else None
-    
-    print(f"📊 Loaded {len(train_data)} training samples")
-    if val_data:
-        print(f"📊 Loaded {len(val_data)} validation samples")
-    
-    # Convert to Hugging Face Dataset format
-    def process_item(item):
-        """Convert our format to instruction-tuning format"""
-        messages = item['messages']
-        user_message = messages[0]['content']  # Full conversation
-        assistant_message = messages[1]['content']  # Scores
+
+# Configuration
+MODEL_NAME = "mistralai/mistral-7b-instruct-v0.2"
+
+# LoRA Configuration
+LORA_R = 16  # LoRA attention dimension (rank)
+LORA_ALPHA = 32  # Alpha parameter for LoRA scaling
+LORA_DROPOUT = 0.05  # Dropout probability for LoRA layers
+TARGET_MODULES = [
+    "q_proj",
+    "k_proj", 
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+]
+
+# BitsAndBytes Configuration for 4-bit quantization
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16
+)
+
+
+def format_conversation(messages: List[Dict[str, str]]) -> str:
+    """
+    Format the conversation messages into a single string.
+    Uses Mistral-Instruct chat template format.
+    """
+    formatted_text = ""
+    for message in messages:
+        role = message["role"]
+        content = message["content"]
         
-        return {
-            "text": f"<s>[INST] {user_message} [/INST] {assistant_message} </s>"
-        }
+        if role == "user":
+            formatted_text += f"<s>[INST] {content} [/INST]"
+        elif role == "assistant":
+            formatted_text += f" {content}</s>"
+        else:
+            formatted_text += f" {content}"
     
-    # Process datasets
-    train_dataset = Dataset.from_list([process_item(item) for item in train_data])
-    val_dataset = Dataset.from_list([process_item(item) for item in val_data]) if val_data else None
+    return formatted_text
+
+
+def load_dataset_from_json(file_path: str) -> Dataset:
+    """
+    Load and preprocess the JSON dataset.
+    Expected format: List of {"messages": [{"role": "...", "content": "..."}, ...]}
+    """
+    print(f"Loading dataset from {file_path}...")
     
-    return train_dataset, val_dataset
-
-
-def setup_wandb():
-    """Initialize Weights & Biases for experiment tracking"""
-    try:
-        # Import W&B config
-        from wandb_config import WANDB_API_KEY, WANDB_PROJECT, WANDB_CONFIG
-        
-        # Login to W&B
-        import wandb
-        wandb.login(key=WANDB_API_KEY)
-        
-        # Initialize run
-        run = wandb.init(
-            project=WANDB_PROJECT,
-            config=WANDB_CONFIG,
-            entity=WANDB_CONFIG.get('entity')
-        )
-        return run
-    except Exception as e:
-        print(f"⚠️  W&B initialization failed: {e}")
-        print("   Continuing without W&B tracking")
-        return None
-
-
-# Add this at the top of your imports
-from transformers import MistralForCausalLM  # Try this first, or if that fails:
-
-# Option 1: If using transformers >= 4.45 (recommended)
-# Simply upgrade transformers: pip install -U transformers
-
-# Option 2: If upgrade isn't possible, use the specific model class
-def setup_model_and_tokenizer():
-    """Load model and tokenizer with QLoRA configuration"""
+    with open(file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
     
-    model_name = "mistralai/Mistral-Small-3.2-24B-Instruct-2506"
+    # Handle both single object and list of objects
+    if isinstance(data, dict):
+        data = [data]
     
-    print("🔧 Setting up model and tokenizer...")
+    # Format conversations
+    formatted_data = []
+    for item in data:
+        if "messages" in item:
+            text = format_conversation(item["messages"])
+            formatted_data.append({"text": text})
     
-    # Quantization config for 4-bit training
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        llm_int8_enable_fp32_cpu_offload=True  # Enable CPU offloading
+    dataset = Dataset.from_list(formatted_data)
+    print(f"Loaded {len(dataset)} examples")
+    return dataset
 
+
+def tokenize_function(examples, tokenizer, max_length=2048):
+    """Tokenize the text examples."""
+    return tokenizer(
+        examples["text"],
+        truncation=True,
+        max_length=max_length,
+        padding="max_length",
+        return_tensors=None,
     )
-    
-    print("   Loading model...")
-    try:
-        from hf_config import HF_API_TOKEN
-        
-        # Try loading with trust_remote_code (for newer architectures)
-        model = MistralForCausalLM.from_pretrained(
-            model_name,
-            quantization_config=bnb_config,
-            device_map="auto",
-            trust_remote_code=True,  # Critical for new model architectures
-            token=HF_API_TOKEN,
-            # Add this to force download of latest config files
-            revision="main"
-        )
-    except Exception as e:
-        print(f"   AutoModel failed, trying direct load: {e}")
-        # Fallback: Try loading as Mistral model directly
-        from transformers import MistralForCausalLM
-        model = MistralForCausalLM.from_pretrained(
-            model_name,
-            quantization_config=bnb_config,
-            device_map="auto",
-            trust_remote_code=True,
-            token=HF_API_TOKEN if 'HF_API_TOKEN' in locals() else None
-        )
-    
+
+
+def setup_model_and_tokenizer():
+    """Initialize the model and tokenizer with quantization."""
+    print(f"Loading model: {MODEL_NAME}")
     
     # Load tokenizer
-    print("   Loading tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = AutoTokenizer.from_pretrained(
+        MODEL_NAME,
+        trust_remote_code=True,
+        padding_side="right"
+    )
     
-    # Prepare model for training
+    # Set pad token if not present
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+    
+    # Load model with 4-bit quantization
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        quantization_config=bnb_config,
+        device_map="auto",
+        trust_remote_code=True,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="eager"
+    )
+    
+    # Prepare model for k-bit training
     model = prepare_model_for_kbit_training(model)
     
     return model, tokenizer
 
 
-
-def setup_peft_config():
-    """Setup PEFT (QLoRA) configuration"""
-    return LoraConfig(
-        lora_alpha=16,
-        lora_dropout=0.1,
-        r=64,
-        bias="none",
-        task_type="CAUSAL_LM",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-    )
-
-
-def train_model(
-    train_dataset,
-    val_dataset=None,
-    output_dir="./results",
-    num_train_epochs=3,
-    per_device_train_batch_size=4,
-    gradient_accumulation_steps=4,
-    learning_rate=2e-4,
-    logging_steps=10,
-    save_steps=100,
-    max_seq_length=512,
-    use_wandb=True
-):
-    """Train the model using SFTTrainer"""
+def setup_lora_model(model):
+    """Configure and apply LoRA to the model."""
+    print("Setting up LoRA configuration...")
     
-    # Initialize W&B if requested
-    wandb_run = setup_wandb() if use_wandb else None
+    lora_config = LoraConfig(
+        r=LORA_R,
+        lora_alpha=LORA_ALPHA,
+        target_modules=TARGET_MODULES,
+        lora_dropout=LORA_DROPOUT,
+        bias="none",
+        task_type=TaskType.CAUSAL_LM,
+        inference_mode=False,
+    )
+    
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+    
+    return model
+
+
+def train(
+    train_file: str,
+    output_dir: str = "./mistral-lora-emergency",
+    num_epochs: int = 3,
+    batch_size: int = 4,
+    gradient_accumulation_steps: int = 4,
+    learning_rate: float = 2e-4,
+    warmup_steps: int = 100,
+    logging_steps: int = 1,
+    save_steps: int = 500,
+    max_length: int = 2048,
+    wandb_project: str = "mistral-emergency-finetune",
+):
+    """
+    Main training function.
+    
+    Args:
+        train_file: Path to JSON training file
+        output_dir: Directory to save model outputs
+        num_epochs: Number of training epochs
+        batch_size: Per-device training batch size
+        gradient_accumulation_steps: Gradient accumulation steps
+        learning_rate: Learning rate
+        warmup_steps: Number of warmup steps
+        logging_steps: Logging frequency
+        save_steps: Checkpoint save frequency
+        max_length: Maximum sequence length
+        wandb_project: Weights & Biases project name
+    """
+    
+    # Initialize W&B
+    wandb.init(project=wandb_project, name="mistral-7b-emergency-lora")
     
     # Setup model and tokenizer
     model, tokenizer = setup_model_and_tokenizer()
     
-    # Setup PEFT
-    peft_config = setup_peft_config()
-    model = get_peft_model(model, peft_config)
+    # Setup LoRA
+    model = setup_lora_model(model)
     
-    print("🚀 Starting training...")
-    print(f"   Model: {model.config._name_or_path}")
-    print(f"   Epochs: {num_train_epochs}")
-    print(f"   Batch size: {per_device_train_batch_size}")
-    print(f"   Learning rate: {learning_rate}")
-    print(f"   Max sequence length: {max_seq_length}")
+    # Load and preprocess dataset
+    dataset = load_dataset_from_json(train_file)
+    
+    # Tokenize dataset
+    def tokenize_fn(examples):
+        return tokenize_function(examples, tokenizer, max_length)
+    
+    tokenized_dataset = dataset.map(
+        tokenize_fn,
+        batched=True,
+        remove_columns=dataset.column_names,
+    )
+    
+    # Split into train/eval if needed (here using full dataset for training)
+    # You can modify this to load separate validation data
+    if len(tokenized_dataset) > 100:
+        split = tokenized_dataset.train_test_split(test_size=0.1)
+        train_dataset = split["train"]
+        eval_dataset = split["test"]
+    else:
+        train_dataset = tokenized_dataset
+        eval_dataset = None
     
     # Training arguments
     training_args = TrainingArguments(
         output_dir=output_dir,
-        num_train_epochs=num_train_epochs,
-        per_device_train_batch_size=per_device_train_batch_size,
+        num_train_epochs=num_epochs,
+        per_device_train_batch_size=batch_size,
+        per_device_eval_batch_size=batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
+        optim="paged_adamw_8bit",  # Memory-efficient optimizer for QLoRA
         learning_rate=learning_rate,
+        warmup_steps=warmup_steps,
+        max_grad_norm=0.3,
+        weight_decay=0.001,
         logging_steps=logging_steps,
+        logging_strategy="steps",
+        eval_strategy="steps" if eval_dataset else "no",
+        eval_steps=save_steps if eval_dataset else None,
+        save_strategy="steps",
         save_steps=save_steps,
-        evaluation_strategy="steps" if val_dataset else "no",
-        eval_steps=save_steps if val_dataset else None,
-        save_total_limit=2,
-        fp16=True,
-        optim="paged_adamw_8bit",
-        report_to="wandb" if wandb_run else "none",
-        run_name=f"mistral-emergency-{datetime.now().strftime('%Y%m%d-%H%M')}"
+        save_total_limit=3,
+        load_best_model_at_end=True if eval_dataset else False,
+        metric_for_best_model="eval_loss" if eval_dataset else None,
+        greater_is_better=False,
+        fp16=False,
+        bf16=True,
+        report_to="wandb",
+        run_name=wandb.run.name,
+        remove_unused_columns=False,
     )
     
     # Data collator
     data_collator = DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
-        mlm=False
+        mlm=False,  # We're doing causal LM, not masked LM
     )
     
-    # Create SFTTrainer
-    trainer = SFTTrainer(
+    # Initialize Trainer
+    trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=val_dataset,
-        tokenizer=tokenizer,
+        eval_dataset=eval_dataset,
         data_collator=data_collator,
-        dataset_text_field="text",
-        max_seq_length=max_seq_length,
-        packing=False
     )
     
-    # Train the model
+    # Train
+    print("Starting training...")
     trainer.train()
     
-    # Save results
-    output_dir = os.path.join(output_dir, "final_model")
-    os.makedirs(output_dir, exist_ok=True)
+    # Save final model
+    print(f"Saving model to {output_dir}")
     trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
     
-    if wandb_run:
-        wandb_run.finish()
+    # Save LoRA adapters separately
+    model.save_pretrained(os.path.join(output_dir, "lora_adapter"))
     
-    print(f"✅ Training complete!")
-    print(f"💾 Model saved to {output_dir}")
-    
-    return model, tokenizer
-
-
-def main():
-    """Main execution function"""
-    
-    # File paths /workspace/mistral-hack/dataset
-    train_file = "/workspace/mistral-hack/dataset/data_ft_train.json"
-    val_file = "/workspace/mistral-hack/dataset/data_ft_test.json"
-    
-    print("🔧 Mistral-Small Fine-Tuning")
-    print("=" * 50)
-    
-    try:
-        # Load and preprocess data
-        print("📋 Loading and preprocessing data...")
-        train_dataset, val_dataset = load_and_preprocess_data(train_file, val_file)
-        
-        # Train the model
-        model, tokenizer = train_model(
-            train_dataset=train_dataset,
-            val_dataset=val_dataset,
-            output_dir="./mistral_finetune_results",
-            num_train_epochs=3,
-            per_device_train_batch_size=2,  # Adjust based on your GPU memory
-            gradient_accumulation_steps=4,
-            learning_rate=2e-4,
-            max_seq_length=512,
-            use_wandb=True
-        )
-        
-        print("\n🎉 Fine-tuning complete!")
-        print("   Model saved to ./mistral_finetune_results/final_model")
-        print("   You can now use this model for inference")
-        
-        # Save sample predictions
-        print("\n🧪 Testing model with sample input...")
-        sample_text = "What is the anxiety score for this emergency call?"
-        input_ids = tokenizer(sample_text, return_tensors="pt").input_ids.cuda()
-        outputs = model.generate(input_ids, max_new_tokens=50)
-        prediction = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        print(f"   Input: {sample_text}")
-        print(f"   Output: {prediction}")
-        
-    except Exception as e:
-        print(f"❌ Training failed: {e}")
-        print("\n💡 Common issues and solutions:")
-        print("   - CUDA out of memory: Reduce batch size or use gradient accumulation")
-        print("   - Installation issues: pip install -r fine_tuning/requirements.txt")
-        print("   - Data format issues: Check your JSONL files")
-        print("   - GPU requirements: Ensure you have a CUDA-compatible GPU with sufficient VRAM")
-        
-        import traceback
-        traceback.print_exc()
+    print("Training complete!")
+    wandb.finish()
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Fine-tune Mistral-7B with LoRA")
+    parser.add_argument("--train_file", type=str, required=True, 
+                        help="Path to training JSON file")
+    parser.add_argument("--output_dir", type=str, default="./mistral-lora-emergency",
+                        help="Output directory for model")
+    parser.add_argument("--epochs", type=int, default=3,
+                        help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=4,
+                        help="Training batch size per device")
+    parser.add_argument("--lr", type=float, default=2e-4,
+                        help="Learning rate")
+    parser.add_argument("--wandb_project", type=str, default="mistral-emergency-finetune",
+                        help="Weights & Biases project name")
+    
+    args = parser.parse_args()
+    
+    train(
+        train_file=args.train_file,
+        output_dir=args.output_dir,
+        num_epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.lr,
+        wandb_project=args.wandb_project,
+    )
