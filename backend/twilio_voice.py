@@ -18,6 +18,7 @@ import audioop
 import base64
 import json
 import os
+import re
 import uuid
 import numpy as np
 from datetime import datetime
@@ -34,7 +35,6 @@ from prompts import SYSTEM_PROMPT
 from stt import transcribe_pcm
 from tts import speak_pcm
 from emergency_services import find_nearest, get_route
-from voice_emotion import analyze_voice_emotion, MAX_HISTORY
 import agent as agent_module
 
 load_dotenv()
@@ -48,8 +48,11 @@ active_streams: dict[str, asyncio.Event] = {}
 MULAW_RATE     = 8000
 CHUNK_BYTES    = 160          # 20 ms de mulaw à 8 kHz
 SPEECH_THRESH  = 400          # RMS → parole détectée
-SILENCE_CHUNKS = 40           # 40 × 20 ms = 800 ms de silence
+SILENCE_CHUNKS = 25           # 25 × 20 ms = 500 ms de silence
 MIN_SPEECH     = 15           # 15 × 20 ms = 300 ms minimum de parole
+
+# Regex : coupure après . ! ? suivi d'un espace (pour le pipeline TTS)
+_SENT_RE = re.compile(r'(?<=[.!?])\s+')
 
 
 # ── Audio helpers ─────────────────────────────────────────────────────────────
@@ -277,25 +280,11 @@ async def twilio_stream(websocket: WebSocket):
                         audio_data = bytes(pcm_buffer)
                         _reset_vad()
 
-                        # Transcription + analyse vocale (en parallèle)
-                        text, voice_emo = await asyncio.gather(
-                            loop.run_in_executor(None, transcribe_pcm, audio_data),
-                            loop.run_in_executor(None, analyze_voice_emotion, audio_data),
-                        )
+                        # Transcription
+                        text = await loop.run_in_executor(None, transcribe_pcm, audio_data)
                         if not text:
                             continue
                         print(f"[TWILIO] Caller: '{text}'")
-
-                        # Mise à jour émotion vocale
-                        if voice_emo:
-                            print(f"[VOICE EMO] {voice_emo['emoji']} {voice_emo['label']} ({voice_emo['confidence']:.2f})")
-                            cur = get_call(call_id) or {}
-                            history = cur.get("voice_emotion_history", [])[-( MAX_HISTORY - 1):]
-                            history.append(voice_emo)
-                            update_call(call_id, {
-                                "voice_emotion":         voice_emo,
-                                "voice_emotion_history": history,
-                            })
 
                         # ── Agent Mistral ─────────────────────────────────────
                         chat_history = [
@@ -305,19 +294,65 @@ async def twilio_stream(websocket: WebSocket):
                             for m in agent.standard_transcript
                         ]
 
+                        # ── Mistral streaming + TTS pipeline ──────────────────
+                        # Dès qu'une phrase est complète dans le stream, on lance
+                        # la génération ElevenLabs sans attendre la fin de la réponse.
                         response_text = ""
+                        sentence_buf  = ""
+                        tts_futures   = []  # asyncio.Future[bytes]
+
                         async for chunk_json in agent.get_responses(text, chat_history):
                             d = json.loads(chunk_json)
                             if d["type"] == "assistant_input":
-                                response_text += d["text"]
+                                tok = d["text"]
+                                response_text += tok
+                                sentence_buf  += tok
+                                m = _SENT_RE.search(sentence_buf)
+                                if m:
+                                    phrase = sentence_buf[:m.start() + 1].strip()
+                                    sentence_buf = sentence_buf[m.end():]
+                                    if phrase:
+                                        tts_futures.append(
+                                            loop.run_in_executor(None, speak_pcm, phrase)
+                                        )
+
+                        # Flush : texte restant sans ponctuation finale
+                        tail = sentence_buf.strip() or response_text
+                        if tail and (not tts_futures or sentence_buf.strip()):
+                            tts_futures.append(loop.run_in_executor(None, speak_pcm, tail))
 
                         print(f"[TWILIO] Dispatcher: '{response_text}'")
                         update_call(call_id, {"transcript": agent.get_transcript()})
                         await manager.broadcast({"event": "db_response", "data": get_all_calls()})
 
-                        # ── TTS (background → barge-in possible) ─────────────
-                        if response_text and stream_sid:
-                            await _play_tts_background(response_text)
+                        # ── Lecture pipeline : phrases dans l'ordre ───────────
+                        if tts_futures and stream_sid:
+                            barge_flag = [False]
+                            agent_speaking = True
+                            _reset_vad()
+
+                            captured_futures = tts_futures  # closure
+
+                            async def _pipeline_runner():
+                                nonlocal agent_speaking
+                                try:
+                                    for fut in captured_futures:
+                                        if barge_flag[0]:
+                                            fut.cancel()
+                                            continue
+                                        try:
+                                            pcm = await fut
+                                            if not barge_flag[0]:
+                                                await _send_chunks(pcm, barge_flag)
+                                        except Exception:
+                                            pass
+                                finally:
+                                    agent_speaking = False
+                                    _reset_vad()
+
+                            t = asyncio.create_task(_pipeline_runner())
+                            tts_task = t
+                            t._barge_flag = barge_flag
 
                         # ── Détection fin d'appel par l'agent ─────────────────
                         if response_text and "goodbye" in response_text.lower():

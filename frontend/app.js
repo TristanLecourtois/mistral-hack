@@ -452,34 +452,47 @@ function renderScores(call) {
 }
 
 // ── Voice emotion ──
-const VE_DEFAULT = { label: "Composed", emoji: "🫤", color: "#94a3b8", confidence: null };
+// Mappage des émotions textuelles Mistral → affichage d'urgence
+const VE_MAP = [
+  { keys: ["panic","terror","horror","shock"],           label: "Panicked",   emoji: "😤", color: "#f43f5e" },
+  { keys: ["fear","scared","afraid","frightened"],       label: "Fearful",    emoji: "😰", color: "#fb923c" },
+  { keys: ["anger","angry","rage","furious","frustrat"], label: "Agitated",   emoji: "😬", color: "#fb923c" },
+  { keys: ["sad","grief","despair","distress","crying"], label: "Distressed", emoji: "😟", color: "#60a5fa" },
+  { keys: ["relief","calm","okay","fine","stable"],      label: "Composed",   emoji: "🫤", color: "#94a3b8" },
+];
+const VE_DEFAULT = { label: "Composed", emoji: "🫤", color: "#94a3b8", intensity: null };
+
+function _mapEmotion(emotions) {
+  if (!emotions || emotions.length === 0) return VE_DEFAULT;
+  // Prendre l'émotion avec la plus haute intensité
+  const top = [...emotions].sort((a, b) => (b.intensity ?? 0) - (a.intensity ?? 0))[0];
+  const key = (top.emotion || "").toLowerCase();
+  for (const entry of VE_MAP) {
+    if (entry.keys.some(k => key.includes(k))) {
+      return { ...entry, intensity: top.intensity };
+    }
+  }
+  return { ...VE_DEFAULT, intensity: top.intensity };
+}
 
 function renderVoiceEmotion(call) {
   const el = document.getElementById("conv-voice-emotion");
   if (!call) { el.innerHTML = ""; return; }
 
-  // Baseline : on affiche toujours au moins "Composed" dès qu'un appel est sélectionné
-  const emo     = call.voice_emotion || VE_DEFAULT;
-  const history = call.voice_emotion_history || [];
-
-  const confidenceStr = (emo.confidence != null)
-    ? `confidence ${Math.round(emo.confidence * 100)}%`
+  const emo = _mapEmotion(call.emotions);
+  const intensityStr = (emo.intensity != null)
+    ? `intensity ${Math.round(emo.intensity * 100)}%`
     : "awaiting analysis…";
 
-  const dots = history.map(e =>
-    `<div class="ve-dot" title="${e.label}" style="background:${e.color}"></div>`
-  ).join("");
-
   el.innerHTML = `
-    <div class="ve-header">VOICE EMOTION ANALYSIS</div>
+    <div class="ve-header">CALLER EMOTIONAL STATE</div>
     <div class="ve-current">
       <span class="ve-emoji">${emo.emoji}</span>
       <div class="ve-info">
         <div class="ve-label" style="color:${emo.color}">${emo.label.toUpperCase()}</div>
-        <div class="ve-confidence">${confidenceStr}</div>
+        <div class="ve-confidence">${intensityStr}</div>
       </div>
     </div>
-    ${history.length > 1 ? `<div class="ve-history">${dots}</div>` : ""}
   `;
 }
 
