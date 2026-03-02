@@ -10,6 +10,7 @@ The system acts as an intelligent first responder: it answers emergency calls in
 ---
 
 [![AuxilAI Demo](https://img.youtube.com/vi/5ub9Y-JuZKU/maxresdefault.jpg)](https://youtu.be/5ub9Y-JuZKU)
+*Click the thumbnail to watch the demo on YouTube*
 
 ---
 
